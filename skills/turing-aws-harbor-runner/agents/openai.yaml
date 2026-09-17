@@ -1,0 +1,4 @@
+interface:
+  display_name: "Turing AWS Harbor Runner"
+  short_description: "Run fast five-wide Harbor evidence on AWS"
+  default_prompt: "Use $turing-aws-harbor-runner to run this frozen Turing task through Oracle and five GLM attempts on the persistent AWS runner."

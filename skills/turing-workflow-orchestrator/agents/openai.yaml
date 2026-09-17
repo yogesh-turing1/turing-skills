@@ -1,0 +1,4 @@
+interface:
+  display_name: "Turing Workflow Orchestrator"
+  short_description: "Orchestrate gated Turing evidence and QC"
+  default_prompt: "Orchestrate this Turing task end to end using the QC authority, trainer lessons, and AWS Harbor runner skills."

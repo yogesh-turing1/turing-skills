@@ -1,0 +1,4 @@
+interface:
+  display_name: "Turing Trainer QC"
+  short_description: "End-to-end Harbor trainer review and submission"
+  default_prompt: "Use $turing-trainer-qc to inspect, repair, measure, package, and hand off this benchmark task."

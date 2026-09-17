@@ -1,0 +1,4 @@
+interface:
+  display_name: "Turing Trainer Lessons"
+  short_description: "Avoid repeated trainer and QC workflow mistakes"
+  default_prompt: "Use $turing-trainer-lessons to diagnose this trainer workflow and apply lessons from prior task iterations."

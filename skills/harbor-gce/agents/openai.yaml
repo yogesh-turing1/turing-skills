@@ -1,0 +1,4 @@
+interface:
+  display_name: "Harbor GCE"
+  short_description: "Connect safely to Harbor GCE worker VMs"
+  default_prompt: "Use $harbor-gce to connect to node 7 and work in an isolated Harbor directory."

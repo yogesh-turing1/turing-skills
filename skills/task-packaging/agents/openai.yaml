@@ -1,0 +1,4 @@
+interface:
+  display_name: "Task Packaging"
+  short_description: "Package task ZIPs with difficulty and verified manifests"
+  default_prompt: "Use $task-packaging to package the supplied task source into a local delivery with the agreed difficulty rules and a verified JSON manifest."

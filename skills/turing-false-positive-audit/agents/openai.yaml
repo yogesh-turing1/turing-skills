@@ -1,0 +1,4 @@
+interface:
+  display_name: "Turing False-Positive Audit"
+  short_description: "Verify disputed QC flags with clear confidence"
+  default_prompt: "Use $turing-false-positive-audit to audit these task and sheet claims, showing confirmed false alarms, remaining issues and evidence-based confidence in plain English."
