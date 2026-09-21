@@ -1,11 +1,11 @@
 ---
-name: delivery-packager
-description: End-to-end Harbor/Shannon task delivery — select a batch from the accepted GCS source, audit it against the fourteen QC factors, remediate and sanitise what is genuinely wrong, package into difficulty/category folders with a reconciled manifest, and emit the client dataset report. Use when asked to prepare, package, remediate, sanitise, or ship a batch of Harbor task archives, or to produce a dataset/delivery report for one. Runs end to end without further input.
+name: delivery-packager-full
+description: Fuller variant of `delivery-packager`: packages by execution type and keeps the twelve mechanical checks inline (the same G01-G12 in `repackaging-qc-gate`). End-to-end Harbor/Shannon task delivery — select a batch from the accepted GCS source, audit it against the fourteen QC factors, remediate and sanitise what is genuinely wrong, package by execution type and difficulty with a reconciled manifest, and emit the client dataset report. Covers running the pass over a whole batch in parallel. Use when asked to prepare, package, remediate, sanitise, re-organise or ship a batch of Harbor task archives, or to produce a dataset/delivery report for one. Runs end to end without further input.
 ---
 
 # Harbor delivery packager
 
-> Two packager skills exist. This one packages by **difficulty/category** and covers running a whole batch in parallel. `delivery-packager-full` packages by **execution type** and carries the twelve mechanical checks inline.
+> Two packager skills exist. This one packages by **execution type** and carries the twelve mechanical checks inline. `delivery-packager` packages by **difficulty/category** and covers running a whole batch in parallel.
 
 Take N accepted task archives from GCS, prove they are sound, fix what is genuinely wrong, and ship a
 package plus a client report. Runs unattended: every decision below is already made.
@@ -37,17 +37,17 @@ VM map (port **2222**, user **root** — port 22 is firewalled and hangs, which 
 
 | Node | IP | Node | IP |
 |---|---|---|---|
-| 1 | <VM_IP_NODE_1> | 7 | <VM_IP_NODE_7> |
-| 2 | <VM_IP_NODE_2> | 8 | <VM_IP_NODE_8> |
-| 3 | <VM_IP_NODE_3> | 9 | <VM_IP_NODE_9> |
-| 4 | <VM_IP_NODE_4> | 10 | <VM_IP_NODE_10> |
-| 5 | <VM_IP_NODE_5> | | (node 6 does not exist) |
+| 1 | <VM_IP> | 7 | <VM_IP> |
+| 2 | <VM_IP> | 8 | <VM_IP> |
+| 3 | <VM_IP> | 9 | <VM_IP> |
+| 4 | <VM_IP> | 10 | <VM_IP> |
+| 5 | <VM_IP> | | (node 6 does not exist) |
 
 ```bash
 ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519_gcp_taskmining -N "" -C "harbor-delivery"
 cat >> ~/.ssh/config <<'EOF'
 Host task-mining-5
-    HostName <VM_IP_NODE_5>
+    HostName <VM_IP>
     User root
     Port 2222
     IdentityFile ~/.ssh/id_ed25519_gcp_taskmining
@@ -146,28 +146,17 @@ to easier" gets read as one pass. Name the field `successes` and keep the four r
 
 ## Phase 3 — Select
 
-1. **Exclude what earlier batches already took**, by folder name **and** by declared name. Different opaque
-   folders can declare the same task; matching on the folder alone ships that task twice across batches.
-2. **Family adjudication.** Group by declared `task.name`, then strip variant suffixes (e.g. output-format or
+1. **Family adjudication.** Group by declared `task.name`, then strip variant suffixes (e.g. output-format or
    version suffixes). Canonical member: prefer a descriptive name over an opaque pipeline id, then shortest.
-   Opaque ids are not only hex — a `<prefix>-single-task-<random token>` wrapper is opaque too, and a
-   hex-only test picks it as canonical over the real name.
-3. **Exclude** 4-pass tasks and any task without four recorded rewards.
-4. **Split.** Connector supply is usually the binding constraint. If the requested connector share is not
+2. **Exclude** 4-pass tasks and any task without four recorded rewards.
+3. **Split.** Connector supply is usually the binding constraint. If the requested connector share is not
    achievable from the source, deliver the achievable split and report the shortfall — never pad with old
    versions, format variants or invented tasks.
-5. **Balance domains** with largest-remainder capped by supply, preferring 2-pass then 1-pass then 0-pass
-   within each domain — but **quota the easier band separately**. Ranking purely by preference starves
-   whichever band the residual pool is poorest in, and the delivered mix collapses onto one bucket. Match the
-   band split an earlier accepted batch used, and check the result spans every bucket the source can offer.
-6. **Freeze**: write `manifest/selection_manifest.csv`, compute and record its SHA-256. If you regenerate the
+4. **Balance domains** with largest-remainder capped by supply, preferring 2-pass then 1-pass then 3-pass
+   tasks within each domain.
+5. **Freeze**: write `manifest/selection_manifest.csv`, compute and record its SHA-256. If you regenerate the
    selection, **version the file** — never overwrite. Overwriting destroys the only record of what was
    previously selected, and it cannot be reconstructed afterwards.
-7. **Emit an availability pool** alongside it: every canonical archive in the source with a status of
-   `batch-N` / `candidate` / `excluded` and the reason. This is what lets a second operator pick a
-   non-overlapping batch without re-deriving the whole inventory. State plainly what the remaining pool
-   cannot supply — a domain or an execution type that earlier batches have exhausted is a supply fact the
-   next operator must plan around, not a detail to leave them to discover.
 
 ---
 
@@ -216,15 +205,8 @@ reported, open the package and confirm it. These failure shapes recur — recogn
 | A "personal" path | Service and container accounts look like home directories | Match real user home paths only |
 | A claim disagrees with evidence | Prose contains incidental figures; a completion count is not a pass rate | Match the specific claim wording, never a bare number |
 | "Undocumented modification" | Your provenance lookup missed a change group | Union across all groups in the modification record |
-| A requirement appears undisclosed | Config carries human-readable justification prose beside the machine-readable check. Prose names files the check never reads | Read the field that actually drives the check, never the serialised blob around it |
 
-When a check turns out to be wrong, fix the check and re-run — do not hand-wave the flag away. Fixing a
-false positive often exposes a **real** finding underneath it: prose that disagrees with the check it
-describes is itself a defect, just a smaller and different one than the check first claimed.
-
-**The row count is the canary.** The audit emits exactly `tasks × factors` rows. If that total drops, some
-task exited the factor loop early — an `if` that should skip one factor's verdict skipped the rest of them
-too. Assert the product before reading any percentage off the result.
+When a check turns out to be wrong, fix the check and re-run — do not hand-wave the flag away.
 
 ---
 
@@ -242,6 +224,32 @@ and you lose the ability to prove nothing else moved.
 
 Record every change in `MODIFICATIONS.json`, grouped by change class with a `per_task` map, and regenerate a
 human-readable changelog from it.
+
+### The twelve mechanical checks
+
+The classes below are principles. Their concrete detection rules, severities and do-not-flag lists
+live in **`REPACKAGING-QC-GATE.md`** as checks **G01–G12**, with `qc_gates.py` beside it as a
+read-only detector (`--gate` / `--csv` / `--json` / `--warn-only`, exit 1 on any BLOCK). Run the
+gate twice: before this phase to produce the work list, after it to prove every class went to zero.
+
+| Gate | Class below |
+|---|---|
+| G01 mutable image reference | Mutable dependency identity |
+| G02 internal infrastructure address | Sensitive or environment-specific data |
+| G03 authoring-machine path | Sensitive or environment-specific data |
+| G04 undeclared connector data provenance | Undeclared provenance |
+| G05 package identity mismatch | Identity mismatch |
+| G06 documentation contradicts evidence | Documentation that contradicts evidence |
+| G07 missing package documentation | Missing documentation |
+| G08 non-task artefact | Non-task artefacts |
+| G09 verifier documentation mismatch | Documentation that contradicts evidence |
+| G10–G12 battery, band, manifest | Phase 6 completion checks |
+
+The gate's corpus evidence is why this phase exists: **89 of 120 packages needed at least one fix
+after passing upstream QC.** Two known defects in the checker itself — it compares Windows
+backslash paths against forward-slash manifest paths, so G12 fires on every package; and its macOS
+and Windows home-path patterns skip the service-account allow-list the Linux one applies, so G03
+fires on the neutral placeholder you just wrote. Confirm both against the package before acting.
 
 ### What to fix
 
@@ -274,18 +282,35 @@ from where, what it does *not* establish, and any evidence pointing the other wa
 today it constrains future behaviour — it does not retroactively describe historical runs, and claiming
 otherwise is a fabricated fact.
 
-**Rank your signals, and prefer the package's own words.** A value the package states about itself — a
-runtime environment variable, an explicit config key — beats a value inferred from a dependency's name.
-Record which tasks rest on the strong signal and which on the weak one; they are not the same claim.
+### Running it over a whole batch
 
-**Declare only where the package decides it.** Where the evidence points both ways, or gives nothing at all,
-leave the field absent and record why. An undeclared field that the package genuinely does not determine is
-an observation about the source, not a defect to close — and a checker that cannot tell those apart will
-push you into inventing a value. Where a schema default already covers omission, silence is also an answer.
+Three things run against every package, in this order, and they are not independent:
 
-**Never overwrite an author's explicit declaration to resolve a contradiction you found.** If the author
-declared one thing and the runtime says another, record the disagreement and leave the declaration standing.
-Deciding which is right is not a packaging call.
+1. **Gate detection** (`qc_gates.py`) — produces the work list.
+2. **Content pass, one per archive** — G01, G02, G03, G04, G06, G07, G09 plus the binary reward
+   conversion, all in a single surgical rewrite so the CRC assertion covers everything at once.
+3. **Identity rename** (G05) — after content, because renaming moves every path.
+4. **Re-verify** — the gate again, plus the battery and band checks.
+5. **Artefact sweep** (G08) — dead last.
+
+**Budget about 18 s per package alone, 40 s under 20 concurrent workers.** Two-thirds of that is the
+gate's two runs. On a 232-package batch with 20 workers the whole pass lands in roughly eight minutes.
+Cache image-digest lookups across tasks: the cost is per distinct image, not per package.
+
+Give each task its own output directory holding the backup, the rewritten archive and its
+`MODIFICATIONS.json`, then delete the gate's scratch copies as each task finishes — four copies of every
+archive on disk at once will fill a shared VM faster than you expect.
+
+**Four ways a batch run fails silently.** Every one of these cost real time:
+
+| Trap | What happens | Do instead |
+|---|---|---|
+| Nested `nohup` + `xargs bash -c` quoting | Collapses, writes no logs, leaves no processes — indistinguishable from "still starting" | Put the driver in a real `.sh` file and launch it with `setsid nohup ./run.sh` |
+| `gcloud storage cp -I` with any stale URI | Aborts on the first missing object; you get one file and no error you'd notice | Use per-file `xargs -P` when misses are possible |
+| A URI list written on Windows | CRLF puts `\r` on every line, so every URI but the last 404s | `tr -d '\r'` before use |
+| A waiter in the agent session | Dies when the session ends; the run itself survives | `setsid` the run, re-arm the waiter, never assume dead waiter means dead job |
+
+Launch detached. A run that survives the session is worth more than one you can watch.
 
 ### Then re-verify to zero
 
@@ -299,17 +324,33 @@ find out why before moving on.
 
 Destination `task-delivery-YYYYMMDD-HHMMSS` (**IST**), never overwriting an existing one.
 
+**Execution type is the parent, difficulty sits under it, domain only under Non-Connector.** Name the
+root folder for the batch, not `finalization_qc_accepted_zipped` — that name says nothing about which
+delivery it is.
+
 ```
 delivery/
   manifest.json
-  finalization_qc_accepted_zipped/
-    easier/  connector/ | non-connector/{engineering,finance,health,legal,other}/
-    harder/  connector/ | non-connector/{...}/
+  verify_delivery.py
+  <batch-name>/
+    Connector/          Easier/ | Harder/          connectors that declare no dataset
+    Real Connector/     Easier/ | Harder/          dataset = real
+    Synthetic/          Easier/ | Harder/          dataset = synthetic
+    Non-Connector/      Easier/ | Harder/ {Engineering,Finance,Health,Legal,Other}/
 ```
 
-Category map: `code` → engineering, `fin` → finance, `health` → health, `law` → legal, `gen` → other.
-Split `connector-real` / `connector-synthetic` **only** when the layout asks for it and provenance is
-verified.
+Category map: `code` → Engineering, `fin` → Finance, `health` → Health, `law` → Legal, `gen` → Other.
+
+The three connector parents hold archives directly — a connector task carries no domain prefix in its
+declared name, so there is nothing to split on. Do not invent a filler level to make the depth uniform.
+
+**A connector with no declared dataset goes in `Connector/`, never into real or synthetic.** Guessing
+which corpus it ran against is the one thing Phase 5's provenance rule forbids, and the folder is where
+that uncertainty stays visible to the recipient.
+
+Record the scheme in the manifest as a `layout` block — root name, the parent list, and a line saying
+what `Connector/` means. The folder names alone do not carry that, and the delivery outlives the
+conversation that produced it.
 
 Copy ZIP bytes unchanged; inspect with `zipfile` and never extract to organise. Validate every destination
 path resolves inside the delivery root. Never overwrite on collision.
@@ -333,3 +374,110 @@ redundant and reads as ops residue.
 
 Sweep OS artefacts (`.DS_Store`, `__MACOSX`, `._*`) **last** — macOS recreates them every time Finder opens
 the folder.
+
+---
+
+## Phase 7 — Client dataset report
+
+**HTML only.** No PDF unless asked; no edit toolbar; one file.
+
+Render with headless Chrome if a PDF is ever wanted:
+
+```bash
+"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --headless --disable-gpu \
+  --no-pdf-header-footer --virtual-time-budget=12000 --print-to-pdf=OUT.pdf "file://IN.html"
+```
+
+### Typography
+
+Bricolage Grotesque ExtraBold titles, Source Serif 4 body, IBM Plex Mono labels. **Google Fonts'
+`/download?family=` endpoint returns HTML, not a ZIP** — fetch from
+`raw.githubusercontent.com/google/fonts/main/ofl/<family>/…` and instantiate static cuts from the variable
+fonts with `fontTools.varLib.instancer`. Embed as base64 so the file is self-contained.
+
+Set `font-variant-ligatures:none`, or "verifier" is stored as "veriﬁer" and the output is un-searchable for
+it. When validating extracted text, normalise ligatures and compare a whitespace-stripped variant too —
+letter-spaced labels extract as `T A S K S`. Those are extraction artefacts, not document defects.
+
+### Structure
+
+Sections numbered **contiguously**. If you drop one, renumber the rest and fix every cross-reference:
+
+```
+01 Where it stands        READ THIS FIRST     lede plus verbatim pull-quote
+02 Score distribution     N TASKS             full vs lighter cards, two-bar chart
+03 Topical breakdown      BY DOMAIN           domain chart; caption uses the bar values
+04 Category pass rate     THE FOURTEEN QC CATEGORIES   per-factor rate with (pass/den)
+05 Realistic output files FROM THIS TREE      card plus extension chart of matches only; name table if ≤20
+06 Named reference list   CANONICAL TASK IDS  present / not in batch / connector among present
+07 Everything else        NOT IN 05 OR 06     remainder by domain; remainder plus covered equals N
+```
+
+Hard locks: title is exactly `<N> Tasks, Delivered Clean`. Hero is `N`, `100%`, `0`, `H`. The pull-quote is
+verbatim. One N everywhere. Every chart caption uses that chart's own numbers.
+
+**Register:** flat and declarative, like an engineer stating results. Not an audit memo — no hedging, no
+"we", no tooling names, host paths, bucket URIs, image digests or internal addresses. Scan the rendered text
+for those before shipping.
+
+**Scope is the requester's call.** Itemizing finalization fixes is legitimate and reads as rigor; omitting
+that section is equally legitimate, since a report need not narrate internal process. What is **not**
+acceptable is asserting the opposite — that nothing was found, or that packages are untouched as authored,
+when archives were modified. Omission is fine; a false claim is not. Keep the provenance record either way;
+it is what makes the corrections defensible if anyone diffs against source.
+
+**Never ship** alongside the delivery: the changelog, modification record, TODO, hygiene report, internal
+verification report, audit CSV, or any backup directory. Send the delivery directory and the report, nothing
+else.
+
+---
+
+## Where the runbook is wrong
+
+`harbor-60-task-delivery-runbook.md` will send you the wrong way on all of these:
+
+| Runbook says | Reality |
+|---|---|
+| An even connector / non-connector split, hard gate | Connector supply is far smaller than the non-connector side. Deliver the achievable split; do not pad |
+| Blocked pending more connector supply | The non-connector side is fine. Report the shortfall and continue |
+| Oracle in E2B **and** Modal | E2B rejects these tasks (`400: Timeout cannot be greater than 1 hours` against a much longer `agent.timeout_sec`), and no Modal token is provisioned. Docker is the only workable environment |
+| Run a full multi-unit audit per task | Tasks already carry a client harbor check verdict from the same profile. Re-running repurchases it |
+| Include tasks at the bottom difficulty band | Verify the band exists in the source before planning around it |
+| A domain has fewer usable tasks than it does | Usually the folder-name classification bug. Re-derive from declared names |
+| A stricter default difficulty policy | Overridden by the delivery policy. Preserve the raw result and record the reconciliation |
+| Two-engineer manifest lock with dual acknowledgement | Single operator. Freeze and hash the manifest, skip the ceremony |
+
+---
+
+## Environment gotchas
+
+- **`rsync` is not installed on the VMs.** Use `ssh <host> 'cd DIR && tar cf - SUB' | tar xf -`. Expect
+  roughly 10 MB/min on a large tree; run it backgrounded.
+- **`pkill -f <pattern>` matches its own SSH command** and kills the shell. Use a self-excluding pattern such
+  as `"job-name-abc[1]"`.
+- **`docker.service` can be restarted by systemd** (unattended upgrades), SIGKILLing every container without
+  a restart policy — `exit=137, oom=false`, all within milliseconds. If foreign containers die, check
+  `journalctl -u docker` before assuming you caused it, and tell the owners.
+- **openpyxl destroys pivot tables and charts** on save. For XLSX edits, rewrite only the target
+  `xl/worksheets/sheetN.xml` inside the zip, copy every other part byte-for-byte, and write cells as
+  `t="inlineStr"` so `sharedStrings.xml` is never touched.
+- The sandbox may block writes outside the project directory and block handling credentials. Write to the
+  scratchpad and `cp` into place; for secrets, hand the user a one-liner that pipes the value without
+  echoing it.
+
+---
+
+## Deliverable checklist
+
+- [ ] GCS never written to
+- [ ] Backups exist for every destructive step, and their paths were stated
+- [ ] `unnamed` domain count equals the connector count (proves declared-name classification)
+- [ ] Difficulty recomputed from raw rewards matches every folder; a pass is exactly 1.0
+- [ ] Every audit FLAG opened and confirmed against the package before being reported
+- [ ] Every modification recorded with its basis and any counter-evidence
+- [ ] Surgical rewrites asserted: only the intended entries changed CRC
+- [ ] Remediation and sanitisation re-verified to zero in the same pass
+- [ ] Manifest and disk agree in both directions; hashes and sizes recomputed
+- [ ] OS artefacts swept last, immediately before handover
+- [ ] Report: one HTML, contiguous section numbers, no internal references, no false claims
+- [ ] Internal records excluded from the client bundle

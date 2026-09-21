@@ -1,0 +1,250 @@
+{
+  "document": "repackaging QC gate \u2014 check definitions and corpus evidence",
+  "generated_at": "2026-09-09T18:57:40.090681+05:30",
+  "corpus": {
+    "packages": 120,
+    "before": "archives as pulled from the accepted source bucket",
+    "after": "the same archives in the final delivered package, after the repackaging pass",
+    "basis": "the repackaging pass its own records: MODIFICATIONS.json, the sanitisation record and the post-pass hygiene re-scan"
+  },
+  "totals": {
+    "packages_modified": 89,
+    "check_failures_before": 142,
+    "check_failures_after": 0
+  },
+  "checks": [
+    {
+      "id": "C1",
+      "name": "Mutable image reference",
+      "severity": "BLOCK",
+      "auto_remediable": "yes",
+      "detect": "In environment/Dockerfile, task.toml and environment/_app/task.toml: a FROM line or an image = value with no @sha256: digest.",
+      "why": "A tag can be repointed at a different build. Once it moves the package no longer describes an environment anyone can reconstruct, and a regrade runs against different software than the recorded battery did. One common base tag was pinned to eight different digests across this corpus, which is direct evidence the tag had already moved while the set was built.",
+      "remediate": "Resolve the tag to its digest and pin all three locations. Record where the digest came from, when, and what it does not establish: a digest resolved today constrains future builds, it does not retroactively describe the historical runs.",
+      "do_not_flag": "Do not rewrite image references under evaluations/, client_qc/, qc_report.html or review.csv. Those are run evidence, not configuration.",
+      "evidence": {
+        "corpus_packages": 120,
+        "packages_failing_before": 32,
+        "rate_before": 0.2667,
+        "occurrences_before": null,
+        "packages_failing_after": 0,
+        "occurrences_after": 0
+      }
+    },
+    {
+      "id": "C2",
+      "name": "Internal infrastructure address",
+      "severity": "BLOCK",
+      "auto_remediable": "yes",
+      "detect": "A routable IPv4 in a host position: after a URL scheme, after @, after a host/hostname/server/endpoint/base_url/proxy/gateway key, or carrying a :port.",
+      "why": "Internal service endpoints do not belong in a delivered artifact. The largest single class in this corpus by both packages affected and raw occurrences.",
+      "remediate": "Replace with a neutral placeholder. Grading never resolves these, so behaviour is unchanged.",
+      "do_not_flag": "Do not match a bare dotted quad. Task corpora and agent reasoning contain digit-group notation (a card mask described as 4.4.4.4) and version-like strings. Ignore private, loopback, link-local, multicast and RFC 5737 documentation ranges.",
+      "evidence": {
+        "corpus_packages": 120,
+        "packages_failing_before": 45,
+        "rate_before": 0.375,
+        "occurrences_before": 1402,
+        "packages_failing_after": 0,
+        "occurrences_after": 0
+      }
+    },
+    {
+      "id": "C3",
+      "name": "Authoring-machine path",
+      "severity": "BLOCK",
+      "auto_remediable": "yes",
+      "detect": "All three home-directory conventions: /Users/<name>, C:\\Users\\<name> and /home/<name>/. Classify by an explicit ALLOW-LIST of service and container accounts - rlgymagent, harbor, runner, node, user, app, ubuntu, root - and treat every other name as personal. The allow-list is required: a deny-list of OS conventions misses whichever platform the author happened to use.",
+      "why": "Local paths name individuals and expose the authoring environment.",
+      "remediate": "Replace with a neutral placeholder.",
+      "do_not_flag": "Container and service account paths (/home/rlgymagent, /home/harbor, runner, node) are generic infrastructure, not personal data. Rewriting them changes meaning.",
+      "evidence": {
+        "corpus_packages": 120,
+        "packages_failing_before": 9,
+        "rate_before": 0.075,
+        "occurrences_before": 66,
+        "packages_failing_after": 0,
+        "occurrences_after": 0
+      }
+    },
+    {
+      "id": "C4",
+      "name": "Undeclared connector data provenance",
+      "severity": "BLOCK",
+      "auto_remediable": "partial",
+      "detect": "A task with MCP servers, no dataset on any declared server, and exactly one distinct GYM_DATASET value stated anywhere under environment/.",
+      "why": "Whether a connector runs against a real or synthetic corpus changes what the task proves.",
+      "remediate": "Declare the value the package already states, and record the basis.",
+      "do_not_flag": "Where the package states both values, or states none, leave it undeclared and record why. That is an observation about the source, not a defect to close by guessing. Never overwrite a value the author declared explicitly, even when the runtime disagrees with it: record the disagreement instead.",
+      "evidence": {
+        "corpus_packages": 120,
+        "packages_failing_before": 18,
+        "rate_before": 0.15,
+        "occurrences_before": null,
+        "packages_failing_after": 0,
+        "occurrences_after": 0
+      }
+    },
+    {
+      "id": "C5",
+      "name": "Package identity mismatch",
+      "severity": "BLOCK",
+      "auto_remediable": "yes",
+      "detect": "Archive filename, internal root directory and the leaf of task.name in task.toml do not all agree.",
+      "why": "Usually the folder is an opaque pipeline id while task.toml carries the real name, so the recipient gets a hash as a filename.",
+      "remediate": "Rename paths only. Every entry keeps its bytes, CRC, timestamp and mode; prove it by comparing the full CRC map before and after with the prefix stripped.",
+      "do_not_flag": "Do not rewrite the old path where it appears under evaluations/. Those references describe where the runs executed at the time. Record them as a known residual.",
+      "evidence": {
+        "corpus_packages": 120,
+        "packages_failing_before": 16,
+        "rate_before": 0.1333,
+        "occurrences_before": null,
+        "packages_failing_after": 0,
+        "occurrences_after": 0
+      }
+    },
+    {
+      "id": "C6",
+      "name": "Documentation contradicts packaged evidence",
+      "severity": "BLOCK",
+      "auto_remediable": "yes",
+      "detect": "Scan ALL THREE documents that can carry a claim - review.csv, README.md and qc_report.html - and EVERY occurrence within each, not the first. Match pass\\s*rate case-insensitively so passRate is caught alongside \"pass rate\", plus \"N/4 passes\". Compare against the count of difficulty rewards equal to exactly 1.0.",
+      "why": "The packaged rewards are authoritative and drive difficulty banding. A document claiming a different rate makes the package argue with itself.",
+      "remediate": "Reconcile the document to the evidence, never the reverse.",
+      "do_not_flag": "A completion count is not a pass rate. \"completed 4/4 executions\" and \"4/4 runs\" say how many trials ran. Rewriting them corrupts a true statement. Do not touch a bare N/4 with no claim wording around it.",
+      "evidence": {
+        "corpus_packages": 120,
+        "packages_failing_before": 13,
+        "rate_before": 0.1083,
+        "occurrences_before": null,
+        "packages_failing_after": 0,
+        "occurrences_after": 0
+      }
+    },
+    {
+      "id": "C7",
+      "name": "Missing package documentation",
+      "severity": "WARN",
+      "auto_remediable": "yes",
+      "detect": "No README.md at the package root.",
+      "why": "Every other package in the set carries one. The gap is visible the moment a reviewer opens two archives side by side.",
+      "remediate": "Generate strictly from in-package evidence: task.toml, the verifier set, evaluations/. State in the file that it was generated rather than authored.",
+      "do_not_flag": "Assert nothing that cannot be read out of the package.",
+      "evidence": {
+        "corpus_packages": 120,
+        "packages_failing_before": 7,
+        "rate_before": 0.0583,
+        "occurrences_before": null,
+        "packages_failing_after": 0,
+        "occurrences_after": 0
+      }
+    },
+    {
+      "id": "C8",
+      "name": "Non-task artefact",
+      "severity": "BLOCK",
+      "auto_remediable": "yes",
+      "detect": ":Zone.Identifier, .DS_Store, ._*, __MACOSX, .swp, .swo, .orig, .rej, Thumbs.db, desktop.ini, editor backups.",
+      "why": "Not part of the task. Download markers additionally record how the file reached the author.",
+      "remediate": "Remove them. Sweep LAST, immediately before handover: several are recreated every time a file browser opens the folder, so a sweep run before packaging looks clean and ships dirty.",
+      "do_not_flag": "Never remove a file the task uses.",
+      "evidence": {
+        "corpus_packages": 120,
+        "packages_failing_before": 1,
+        "rate_before": 0.0083,
+        "occurrences_before": 32,
+        "packages_failing_after": 0,
+        "occurrences_after": 0
+      }
+    },
+    {
+      "id": "C9",
+      "name": "Verifier documentation mismatch",
+      "severity": "WARN",
+      "auto_remediable": "yes",
+      "detect": "A verifier how_justification naming <stem>.<extA> where that verifier's source reads <stem>.<extB>.",
+      "why": "The human-readable field and the machine-readable check disagree about which file is being verified. Grading is unaffected; a reviewer reading the justification is told the wrong thing.",
+      "remediate": "Correct the description string only.",
+      "do_not_flag": "Never touch the source, assertion, path or weight. Grading behaviour must not change.",
+      "evidence": {
+        "corpus_packages": 120,
+        "packages_failing_before": 1,
+        "rate_before": 0.0083,
+        "occurrences_before": null,
+        "packages_failing_after": 0,
+        "occurrences_after": 0
+      }
+    },
+    {
+      "id": "C10",
+      "name": "Incomplete difficulty battery",
+      "severity": "BLOCK",
+      "auto_remediable": "no",
+      "detect": "Not exactly four recorded rewards under evaluations/difficulty/r1..r4.",
+      "why": "Difficulty banding is computed from the four-run battery. Without all four the band is not derivable and the package cannot be placed.",
+      "remediate": "Do not ship it. Route to review with the count actually found.",
+      "do_not_flag": "Do not infer a missing reward from any other file.",
+      "evidence": {
+        "corpus_packages": 120,
+        "packages_failing_before": 0,
+        "rate_before": 0.0,
+        "occurrences_before": null,
+        "packages_failing_after": 0,
+        "occurrences_after": 0
+      }
+    },
+    {
+      "id": "C11",
+      "name": "Difficulty band mismatch",
+      "severity": "BLOCK",
+      "auto_remediable": "no",
+      "detect": "Band recomputed from the raw rewards differs from the folder the archive sits in or from the manifest. A pass is exactly 1.0: 3 of 4 is the lighter band, 0 to 2 is full difficulty, 4 of 4 is out of band.",
+      "why": "Recomputing from the reward files is the only check that cannot inherit an upstream mistake.",
+      "remediate": "Recompute and refile.",
+      "do_not_flag": "Never take the band from an upstream field without recomputing it.",
+      "evidence": {
+        "corpus_packages": 120,
+        "packages_failing_before": 0,
+        "rate_before": 0.0,
+        "occurrences_before": null,
+        "packages_failing_after": 0,
+        "occurrences_after": 0
+      }
+    },
+    {
+      "id": "C12",
+      "name": "Manifest does not reconcile",
+      "severity": "BLOCK",
+      "auto_remediable": "no",
+      "detect": "Manifest and disk disagree in either direction, or a hash, size, id or name is wrong or duplicated.",
+      "why": "The manifest is what the recipient verifies against. If it disagrees with the tree, nothing else in it can be trusted.",
+      "remediate": "Recompute every hash and size from the delivered bytes and reconcile both directions.",
+      "do_not_flag": "Never carry a hash forward from an earlier stage.",
+      "evidence": {
+        "corpus_packages": 120,
+        "packages_failing_before": 0,
+        "rate_before": 0.0,
+        "occurrences_before": null,
+        "packages_failing_after": 0,
+        "occurrences_after": 0
+      }
+    }
+  ],
+  "not_flagged_by_design": [
+    {
+      "pattern": "Anthropic / AWS / Google API keys",
+      "observed": 0,
+      "verdict": "clear throughout the corpus"
+    },
+    {
+      "pattern": "GitHub-token-shaped string",
+      "observed": 1,
+      "verdict": "false positive \u2014 a substring of an encrypted reasoning blob. Trace every credential-shaped match to its containing field before classifying it."
+    },
+    {
+      "pattern": "Slack-token-shaped string",
+      "observed": 18,
+      "verdict": "a literal placeholder bound to the gym proxy acting account at image build. It is configuration, not a credential; replacing it changes runtime behaviour."
+    }
+  ]
+}
