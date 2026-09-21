@@ -1,0 +1,13 @@
+check,name,severity,auto_remediable,corpus_packages,packages_before,rate_before_pct,occurrences_before,packages_after,occurrences_after
+C1,Mutable image reference,BLOCK,yes,120,32,26.7,,0,0
+C2,Internal infrastructure address,BLOCK,yes,120,45,37.5,1402,0,0
+C3,Authoring-machine path,BLOCK,yes,120,9,7.5,66,0,0
+C4,Undeclared connector data provenance,BLOCK,partial,120,18,15.0,,0,0
+C5,Package identity mismatch,BLOCK,yes,120,16,13.3,,0,0
+C6,Documentation contradicts packaged evidence,BLOCK,yes,120,13,10.8,,0,0
+C7,Missing package documentation,WARN,yes,120,7,5.8,,0,0
+C8,Non-task artefact,BLOCK,yes,120,1,0.8,32,0,0
+C9,Verifier documentation mismatch,WARN,yes,120,1,0.8,,0,0
+C10,Incomplete difficulty battery,BLOCK,no,120,0,0.0,,0,0
+C11,Difficulty band mismatch,BLOCK,no,120,0,0.0,,0,0
+C12,Manifest does not reconcile,BLOCK,no,120,0,0.0,,0,0
