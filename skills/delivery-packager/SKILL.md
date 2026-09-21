@@ -35,17 +35,17 @@ VM map (port **2222**, user **root** — port 22 is firewalled and hangs, which 
 
 | Node | IP | Node | IP |
 |---|---|---|---|
-| 1 | 35.253.35.165 | 7 | 34.136.65.42 |
-| 2 | 34.70.10.213 | 8 | 34.122.249.14 |
-| 3 | 34.27.34.220 | 9 | 136.65.187.0 |
-| 4 | 136.64.70.1 | 10 | 136.116.119.252 |
-| 5 | 35.255.61.146 | | (node 6 does not exist) |
+| 1 | <VM_IP_NODE_1> | 7 | <VM_IP_NODE_7> |
+| 2 | <VM_IP_NODE_2> | 8 | <VM_IP_NODE_8> |
+| 3 | <VM_IP_NODE_3> | 9 | <VM_IP_NODE_9> |
+| 4 | <VM_IP_NODE_4> | 10 | <VM_IP_NODE_10> |
+| 5 | <VM_IP_NODE_5> | | (node 6 does not exist) |
 
 ```bash
 ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519_gcp_taskmining -N "" -C "harbor-delivery"
 cat >> ~/.ssh/config <<'EOF'
 Host task-mining-5
-    HostName 35.255.61.146
+    HostName <VM_IP_NODE_5>
     User root
     Port 2222
     IdentityFile ~/.ssh/id_ed25519_gcp_taskmining
@@ -67,7 +67,7 @@ Shared credentials live in `/root/.config/harbor/env`. **Do not edit that file**
 
 ## Phase 1 — Inventory and identity
 
-Source: `gs://obi-harbor-pipeline/tasks/finalisation_client_qc_accepted_iteration_2/`
+Source: `gs://<TASK_BUCKET>/tasks/finalisation_client_qc_accepted_iteration_2/`
 Per task: `<task-name>/<sha256>.zip` plus `<task-name>/review_handoff/<sha256>.json`.
 
 ```bash

@@ -1,5 +1,5 @@
 ---
-name: harbor-task-repair
+name: delivery-harbor-task-repair
 description: Use when Harbor task packages fail client QC with findings about doubled image digests, fractional rewards, oracle-frozen stability evidence, duplicate evaluation batteries, or unbuildable environments — and the packages must be repaired with an auditable record of every change.
 ---
 
