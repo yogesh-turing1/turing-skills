@@ -65,10 +65,10 @@ bytes copied unchanged. All completion checks must pass: archives readable,
 recomputed SHA-256 and sizes matching, manifest and disk agreeing both ways,
 difficulty recomputed independently from raw rewards.
 
-**7. Stage.** Copy to `gs://yogesh-harbor-deliveries/ready-for-delivery/<batch>/`.
+**7. Stage.** Copy to `gs://<DELIVERY_STAGING_BUCKET>/ready-for-delivery/<batch>/`.
 Staging is deletable by design; nothing there is a record.
 
-**8. Ship** (only on explicit go): copy to `gs://yogesh-harbor-delivered/<batch>/`,
+**8. Ship** (only on explicit go): copy to `gs://<DELIVERED_BUCKET>/<batch>/`,
 verify the copy, THEN remove from staging. Never move first and verify after.
 That bucket has 90-day retention — a mistaken upload is stuck for 90 days.
 
