@@ -116,6 +116,43 @@ record it as unresolved and leave the reference alone. Never invent a digest.
 **Do not flag / do not touch.** Image references under `evaluations/`, `client_qc/`,
 `qc_report.html` or `review.csv`. Those are run evidence, not configuration.
 
+### C13 · Image reference carries two digests · BLOCK · auto
+
+**Detect.** In the same three files C1 covers: a `FROM` line or `image =` value where
+`@sha256:` appears more than once.
+
+```
+FROM python:3.12-slim-bookworm@sha256:782412e8...2254@sha256:a116514e...8134
+FROM python@sha256:a116514e...78134m@sha256:a116514e...78134
+```
+
+**Why.** Two digests on one reference is not a parseable OCI image reference. Modal rejects
+it at pull. That surfaces as `ImageBuildError` -> `Sandbox not found` -> an oracle that never
+ran, so the package reads as a grading failure rather than the packaging defect it is. One
+batch of 232 had 169 of them; a second batch of 500 had 52 more.
+
+**This is C1's remediation going wrong, not a separate authoring mistake.** C1 says to pin the
+tag to a digest. Where that was applied as an append rather than a replace, the original
+reference survived alongside the new one. The second shape above is the same bug with an
+off-by-one: the replacement consumed the tag `:3.12-slim-bookworm` *minus its last character*,
+stranding the `m`. The stray character is always the tag's final one - `bookwor`**m**,
+`2026091`**7** - which is how you can tell the two apart at a glance.
+
+**Why C1 does not catch it.** A doubled reference contains `@sha256:`, so any check asking
+only whether a digest is present reads it as correctly pinned. The mechanical image check used
+`.+@sha256:[0-9a-f]{64}$`, anchored at the tail, and passed all 169 while every one of them was
+unbuildable. C13 is checked *before* the already-pinned skip for exactly this reason.
+
+**Remediate.** Keep the **last** digest and drop everything between the image name and it,
+including any stranded character. Evidence that the last one is authoritative: `client_qc/
+access-receipt.json` names the second digest and never the first, and the first is the same
+constant value in 168 of 169 cases - a template, not a resolution. A digest alone is a complete
+reference; the tag is not needed once pinned.
+
+Verify the rewritten reference actually parses rather than trusting the substitution. A repair
+regex that expects the two digests to be *adjacent* silently does nothing to the stranded-character
+shape, and reports success.
+
 ### C2 · Internal infrastructure address · BLOCK · auto
 
 **Detect.** A routable IPv4 in a **host position**: after a URL scheme, after `@`, after a

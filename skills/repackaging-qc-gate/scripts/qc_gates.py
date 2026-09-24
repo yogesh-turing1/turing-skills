@@ -117,6 +117,18 @@ GATES = [
          fix='Resolve the tag to its digest and pin it in environment/Dockerfile, task.toml and '
              'environment/_app/task.toml. Record where the digest came from and what it does not '
              'establish. Leave evaluations/ and reported QC output alone.'),
+    dict(id='G13', name='Image reference carries two digests',
+         severity='BLOCK', scope='package',
+         summary='A FROM line or image = value pins more than one @sha256: digest.',
+         why='Two digests on one reference is not a parseable OCI image reference. The build '
+             'fails at pull, which surfaces downstream as ImageBuildError and then as an oracle '
+             'that never ran - so the package reads as a grading failure rather than as the '
+             'packaging defect it is. G01 alone does not catch it: a doubled reference contains '
+             '@sha256: and passes any check that asks only whether a digest is present.',
+         fix='Keep the last digest and drop everything between the image name and it, including '
+             'any stray character left behind by a partially consumed tag. A digest alone is a '
+             'complete reference; the tag is not needed once it is pinned. Verify the result '
+             'parses before repackaging - do not assume the substitution matched.'),
     dict(id='G02', name='Internal infrastructure address',
          severity='BLOCK', scope='package',
          summary='A routable address appears in a host position in package text.',
@@ -261,6 +273,14 @@ def check_package(zp: Path, enabled: set[str]) -> list[dict]:
             refs = IMAGE_IN_DOCKERFILE.findall(txt) if rel.endswith('Dockerfile') else IMAGE_IN_TOML.findall(txt)
             for ref in refs:
                 base = ref.split('@')[0]
+                if ref.count('@sha256:') > 1:
+                    # Checked before the already-pinned skip below: a doubled
+                    # reference contains '@sha256:' and would otherwise be read
+                    # as correctly pinned. This is how the defect survived the
+                    # gate the first time.
+                    add('G13', 'image reference carries more than one digest and cannot be '
+                               'resolved by any OCI runtime', f'{rel}: {ref}')
+                    continue
                 if '@sha256:' in ref or base in SCRATCH_BASES or ref.startswith('$'):
                     continue
                 add('G01', 'image referenced by a mutable tag rather than a digest', f'{rel}: {ref}')
