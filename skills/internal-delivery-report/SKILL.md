@@ -31,6 +31,19 @@ layout and writes the PDF. Fonts ship in `fonts/`.
 | Input | What it supplies |
 |---|---|
 | `MODIFICATIONS.json` | Every change class, its per-package map, and the basis text |
+
+**Only a known change class is rendered.** A key the generator does not recognise is dropped
+without a word, so a modification filed under a new name silently disappears from the record —
+the one thing this report exists to prevent. The recognised keys are:
+
+`_os_artefacts` · `_image_pinning` · `_image_digest` · `_dataset_declaration` ·
+`_stale_qc_claims` · `_verifier_justification` · `_readme_generation` · `_redaction` ·
+`_folder_rename` · `_binary_reward`
+
+Adding a class means adding it to `TITLES`, `ORDER` and `ABBR` together. Each entry is a dict of
+meta fields (`fix`, `BASIS`, `PROVENANCE`, `CORROBORATION`, `COUNTER_EVIDENCE`,
+`CONTENT_UNCHANGED`, `KNOWN_RESIDUAL`, `scope`, `result`) plus `per_task`.
+
 | `manifest.json` | Package count, difficulty, trial evidence; the sanitisation record if the pass kept one there |
 | `delivery_manifest.csv` | The 12-column inventory: name, family, execution type, domain, gym, GLM bucket, hashes, sizes |
 | `audit-14-factor-findings.csv` | One row per package per factor with `PASS` / `FLAG` / `INFO` / `NA` |
@@ -131,6 +144,18 @@ backdrop, shadow and margin so the PDF is unaffected by the screen presentation.
 **Audit before shipping.** The generator re-opens its own output, measures every page, and exits
 non-zero if any exceeds the box. Do not skip it — overflow is invisible in the HTML and only
 shows up as clipped content in the PDF.
+
+**Fit to a slightly shorter box than the page.** Chrome lays a page out fractionally taller when
+printing than when rendering to screen, because line boxes round differently. A page measured at
+exactly 1056px on screen passes the audit and still loses its last row and its footer in the PDF.
+Fitting targets `PAGE_PX - PRINT_SLACK` (34px, override with `HARBOR_PRINT_SLACK`). The number is
+not a guess to be tuned by eye: prove it by extracting text from the finished PDF and checking
+that every page still carries the footer and every package name still appears.
+
+**A package list can itself be taller than the page.** A change class touching a few hundred
+packages does not fit whole and does not fit as one carried-over block either. The list is split
+across as many continuation blocks as it needs, each sized by render. Before this, the packer
+could only move it whole, and it overflowed silently.
 
 ---
 
