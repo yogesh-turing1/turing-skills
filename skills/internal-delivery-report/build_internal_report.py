@@ -322,7 +322,9 @@ PAGE_PX = 1056          # 11in at 96dpi, the printed page box
 # screen - line boxes round differently - so a page that measures exactly 1056px
 # on screen loses its last row and its footer in the PDF. Fitting targets a
 # slightly shorter box; the PDF audit below is what proves the number is enough.
-PRINT_SLACK = int(os.environ.get('HARBOR_PRINT_SLACK', '34'))
+# It has to clear the tallest single row the fitter can add, or the fit is still
+# one row too generous: inventory rows are two lines (~42px at this type size).
+PRINT_SLACK = int(os.environ.get('HARBOR_PRINT_SLACK', '56'))
 FIT_PX = PAGE_PX - PRINT_SLACK
 
 def measure_blocks(blocks, header_html):
