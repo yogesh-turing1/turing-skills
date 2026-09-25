@@ -28,7 +28,7 @@ Optional:
 
 Requires Python 3.9+ and Google Chrome (used to measure layout and to write the PDF).
 """
-import argparse, base64, csv, html, json, re, subprocess, sys, tempfile
+import argparse, base64, csv, html, json, os, re, subprocess, sys, tempfile
 from collections import Counter, defaultdict
 from pathlib import Path
 
@@ -37,7 +37,13 @@ FONT_DIR = HERE/'fonts'
 CHROME = next((p for p in (
     '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
     '/usr/bin/google-chrome', '/usr/bin/chromium', '/usr/bin/chromium-browser',
-    '/Applications/Chromium.app/Contents/MacOS/Chromium') if Path(p).exists()), None)
+    '/Applications/Chromium.app/Contents/MacOS/Chromium',
+    # Windows: the delivery VMs have no browser, so the report is built on the
+    # workstation and the generator has to find Chrome there too
+    'C:/Program Files/Google/Chrome/Application/chrome.exe',
+    'C:/Program Files (x86)/Google/Chrome/Application/chrome.exe',
+    str(Path.home()/'AppData/Local/Google/Chrome/Application/chrome.exe'),
+) if Path(p).exists()), None)
 e = html.escape
 
 FACTORS = ['Package consistency','Clarity and scope','Realism and leakage','Difficulty',
@@ -69,13 +75,17 @@ TITLES = {
  '_readme_generation':'Missing package documentation generated',
  '_redaction':'Internal addresses and authoring-machine paths removed',
  '_folder_rename':'Package folder names aligned to declared identity',
+ '_image_digest':'Doubled image digests resolved to one',
+ '_binary_reward':'Recorded rewards normalised to binary',
 }
-ORDER = ['_os_artefacts','_image_pinning','_dataset_declaration','_stale_qc_claims',
-         '_verifier_justification','_readme_generation','_redaction','_folder_rename']
+ORDER = ['_os_artefacts','_image_pinning','_image_digest','_dataset_declaration',
+         '_stale_qc_claims','_verifier_justification','_readme_generation','_redaction',
+         '_folder_rename','_binary_reward']
 SHORT = {k: v.split(' ')[0] for k, v in TITLES.items()}
 ABBR = {'_os_artefacts':'ART','_image_pinning':'PIN','_dataset_declaration':'DAT',
         '_stale_qc_claims':'QC','_verifier_justification':'VJ','_readme_generation':'DOC',
-        '_redaction':'RED','_folder_rename':'NAME'}
+        '_redaction':'RED','_folder_rename':'NAME','_image_digest':'DIG',
+        '_binary_reward':'BIN'}
 PROV = [('fix','What changed'),('BASIS','Basis'),('PROVENANCE','Provenance'),('CORROBORATION','Corroboration'),
         ('COUNTER_EVIDENCE','Counter-evidence'),('CONTENT_UNCHANGED','Content unchanged'),
         ('KNOWN_RESIDUAL','Known residual'),('NOT_APPLIED_TO','Deliberately not applied'),
@@ -308,6 +318,14 @@ def barrow(label, val, mx, alt=False, suffix=''):
 
 
 PAGE_PX = 1056          # 11in at 96dpi, the printed page box
+# Chrome lays a page out fractionally taller when printing than when rendering to
+# screen - line boxes round differently - so a page that measures exactly 1056px
+# on screen loses its last row and its footer in the PDF. Fitting targets a
+# slightly shorter box; the PDF audit below is what proves the number is enough.
+# It has to clear the tallest single row the fitter can add, or the fit is still
+# one row too generous: inventory rows are two lines (~42px at this type size).
+PRINT_SLACK = int(os.environ.get('HARBOR_PRINT_SLACK', '56'))
+FIT_PX = PAGE_PX - PRINT_SLACK
 
 def measure_blocks(blocks, header_html):
     """Render the blocks in headless Chrome and read back their true pixel heights.
@@ -383,11 +401,11 @@ def fit_rows(row_htmls, header_html, table_open, extra_html='', src_text='x', bu
     if build is None:
         build = lambda rows: header_html + table_open + "".join(rows) + '</table>' + extra_html
     lo, hi = 1, len(row_htmls)
-    if _page_height(build(row_htmls), src_text) <= PAGE_PX:
+    if _page_height(build(row_htmls), src_text) <= FIT_PX:
         return hi
     while lo < hi:
         mid = (lo + hi + 1) // 2
-        if _page_height(build(row_htmls[:mid]), src_text) <= PAGE_PX:
+        if _page_height(build(row_htmls[:mid]), src_text) <= FIT_PX:
             lo = mid
         else:
             hi = mid - 1
@@ -545,6 +563,16 @@ def render(cfg, d):
                'rewritten.'))
 
     # --- 05..n provenance (paginated)
+    def chip_tail(spans, total):
+        return (f'<p class="pv"><span class="pl">Packages ({total})</span></p>'
+                f'<div class="pkgs">{" ".join(spans)}</div>')
+
+    def chip_page(k, spans, total):
+        return (f'<div class="chg"><div class="cht">{e(TITLES[k])}'
+                f'<span class="cont"> continued</span></div>'
+                f'{chip_tail(spans, total)}</div>')
+
+    SPANS = {}
     blocks = []
     for k in ORDER:
         g = d['groups'].get(k)
@@ -575,12 +603,11 @@ def render(cfg, d):
         reasoning = "".join(h) + '</div>'
         chips, whole = '', reasoning
         if g['tasks']:
-            names = ' '.join(f'<span class="pk">{e(t)}</span>' for t in sorted(g['tasks']))
-            tail = (f'<p class="pv"><span class="pl">Packages ({len(g["tasks"])})</span></p>'
-                    f'<div class="pkgs">{names}</div>')
+            spans = [f'<span class="pk">{e(t)}</span>' for t in sorted(g['tasks'])]
+            SPANS[k] = spans
+            tail = chip_tail(spans, len(g['tasks']))
             whole = "".join(h) + tail + '</div>'
-            chips = (f'<div class="chg"><div class="cht">{e(TITLES[k])}'
-                     f'<span class="cont"> continued</span></div>{tail}</div>')
+            chips = chip_page(k, spans, len(g['tasks']))
         blocks.append((k, whole, reasoning, chips))
 
     # pack by MEASURED height. Estimating block weight put one class on each page and left
@@ -595,17 +622,39 @@ def render(cfg, d):
     heights, chrome = measure_blocks(flat, hdr)
     H = {k: dict(whole=heights[3*i], head=heights[3*i+1], chips=heights[3*i+2])
          for i, (k, _w, _r, _c) in enumerate(blocks)}
-    budget = PAGE_PX - chrome - 30                     # slack: rounding plus the box shadow the packer cannot see
+    budget = FIT_PX - chrome - 30                      # slack: rounding plus the box shadow the packer cannot see
     chunks, cur, cw = [], [], 0
     for k, whole, reasoning, chips in blocks:
         hw = H[k]['whole']
         if cw + hw <= budget:
             cur.append(whole); cw += hw
             continue
-        if chips and cw + H[k]['head'] <= budget and H[k]['chips'] <= budget:
+        if chips:
+            # the reasoning goes on a fresh page when it will not fit on this one;
+            # falling through to the whole-block branch puts an oversized package
+            # list on a single page, which is the overflow this split exists to avoid
+            if cw + H[k]['head'] > budget:
+                if cur:
+                    chunks.append(cur)
+                cur, cw = [], 0
             cur.append(reasoning)
             chunks.append(cur)
-            cur, cw = [chips], H[k]['chips']
+            if H[k]['chips'] <= budget:
+                cur, cw = [chips], H[k]['chips']
+                continue
+            # A class touching several hundred packages has a list taller than the
+            # page box. Moving it whole was the only option here and it overflowed
+            # silently, which only shows up as clipped names in the PDF. Split it
+            # by render, the same way inventory rows are fitted.
+            total, rest, pages = len(SPANS[k]), list(SPANS[k]), []
+            while rest:
+                n = fit_rows(rest, hdr, '', src_text=cfg['source_line'],
+                             build=lambda rows: hdr + chip_page(k, rows, total))
+                pages.append(chip_page(k, rest[:n], total))
+                rest = rest[n:]
+            for pg in pages[:-1]:
+                chunks.append([pg])
+            cur, cw = [pages[-1]], budget      # rendered full by construction
             continue
         if cur:
             chunks.append(cur)
@@ -790,7 +839,9 @@ def main(argv=None):
     )
     d = load(cfg)
     doc = render(cfg, d)
-    out_html = a.out.with_suffix('.html')
+    # with_suffix() treats "…-GLM-5.3-397" as name "…-GLM-5" + suffix ".3-397"
+    # and silently writes a different file than the caller asked for
+    out_html = a.out.with_name(a.out.name + '.html')
     out_html.parent.mkdir(parents=True, exist_ok=True)
     out_html.write_text(doc.html(cfg['title']), encoding='utf-8')
 
@@ -811,11 +862,16 @@ def main(argv=None):
     print('  every page fits the 11in box')
 
     if a.pdf:
-        out_pdf = a.out.with_suffix('.pdf')
-        subprocess.run([CHROME, '--headless', '--disable-gpu', '--no-pdf-header-footer',
-                        '--virtual-time-budget=30000', f'--print-to-pdf={out_pdf}',
-                        f'file://{out_html.resolve()}'], capture_output=True)
-        print(f'  {out_pdf}')
+        # A relative --print-to-pdf destination is silently ignored on Windows:
+        # Chrome exits 0 and writes nothing. Resolve it, and check it landed.
+        out_pdf = a.out.with_name(a.out.name + '.pdf').resolve()
+        r = subprocess.run([CHROME, '--headless', '--disable-gpu', '--no-pdf-header-footer',
+                            '--virtual-time-budget=30000', f'--print-to-pdf={out_pdf}',
+                            out_html.resolve().as_uri()], capture_output=True, text=True)
+        if not out_pdf.is_file():
+            print(f'  PDF NOT WRITTEN: {(r.stderr or "").strip()[:200]}')
+            return 1
+        print(f'  {out_pdf}  ({out_pdf.stat().st_size:,} bytes)')
     return 0
 
 
@@ -829,7 +885,7 @@ def audit_pages(path):
     with tempfile.NamedTemporaryFile('w', suffix='.html', delete=False) as f:
         f.write(doc); tmp = f.name
     out = subprocess.run([CHROME, '--headless', '--disable-gpu', '--virtual-time-budget=12000',
-                          '--window-size=1000,30000', '--dump-dom', f'file://{tmp}'],
+                          '--window-size=1000,30000', '--dump-dom', Path(tmp).resolve().as_uri()],
                          capture_output=True, text=True).stdout
     m = re.search(r'<pre id="OUT">(\[.*?\])</pre>', out, re.S)
     if not m:
