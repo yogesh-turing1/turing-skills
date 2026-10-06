@@ -27,6 +27,22 @@ only tools are those keeps the bare label `Company Bench · …`. Do not guess a
 harness from them; an unresolved label is the honest answer and the count is still
 correct.
 
+### Images whose name does not say
+
+Some images carry neither word. `KNOWN_IMAGES` in `scripts/categorise.py` pins
+those **by exact digest**, and a digest goes in only with the evidence that
+settled it.
+
+**A repository name is not evidence.** `kuzphi/company-bench-private` has hosted a
+zeta-tagged build *and* a digest whose tasks use only Aster tools. A tag prefix is
+not evidence either: the three `connectors-harness` digests are tagged
+`company-synthetic-*`, which names neither harness.
+
+What does settle it: the tools the digest's own tasks use. If none is Zeta-only
+and the ones with delivered history are Aster-only, it is Aster. If that test is
+ambiguous, leave the digest out — an unresolved label costs nothing, and a wrong
+one silently moves tasks between harnesses.
+
 ## Counting tools
 
 - A tool is a name ending `-gym`, or one of `slack` `linear` `github` `notion`

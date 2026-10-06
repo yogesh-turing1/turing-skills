@@ -61,3 +61,19 @@ def test_label_when_no_tools_are_listed_at_all():
 def test_an_image_wins_over_the_connectors():
     # a zeta image with a single aster-ish tool is still Zeta
     assert label("reg/zeta-v3@sha256:x", ["github"]) == "Zeta · Single connector"
+
+
+def test_a_known_digest_decides_the_harness_when_the_name_cannot():
+    # connectors-harness carries no 'aster' in its name but is the Aster harness;
+    # confirmed by its tasks using no Zeta-only tool and only Aster-only ones
+    img = ("us-central1-docker.pkg.dev/delivery-g-obi/connectors-rl-gym/"
+           "connectors-harness@sha256:b1374cd8a392ea66f9a649e700a1498e8fcb03ee"
+           "35776362db7cc15dc3049b89")
+    assert harness_of(img, ["slack-gym"]) == "Aster"
+    assert label(img, ["slack-gym"]) == "Aster · Single connector"
+
+
+def test_an_unknown_digest_of_the_same_repo_stays_unresolved():
+    img = ("us-central1-docker.pkg.dev/delivery-g-obi/connectors-rl-gym/"
+           "connectors-harness@sha256:" + "0" * 64)
+    assert harness_of(img, ["slack-gym"]) == "Company Bench"
