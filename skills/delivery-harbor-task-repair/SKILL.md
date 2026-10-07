@@ -41,13 +41,15 @@ Before touching anything: copy the packages to `baseline/`, hash every file, `ch
 - Don't rewrite a declared hash to match a file — that makes the check pass and proves nothing
 - Don't write stability evidence unless a replay reproduced the original reward exactly
 - Don't edit QC provenance records (`client_qc*`) to match a new reality
+- Don't change a recorded verdict. Binarizing a recorded fractional reward is required (see [fix 2](#2-fractional-reward)); turning a `0.999` into a `1`, or binarizing the evidence without fixing the code that wrote it, is tampering
+- Don't re-run QC or any battery on your own because a run went stale. Detect it, tell the user which tasks, and ask (see [Stale runs](#stale-runs-detect-notify-ask))
 
 ## Quick Reference
 
 | Finding | Fix | Verification |
 |---|---|---|
 | Doubled digest `@sha256:X@sha256:Y` | keep only the final `@sha256:` | build succeeds **and** the kept digest matches the package's own receipt |
-| Fractional final reward | binarize at the write site | golden→`1`, broken→`0` in the real image |
+| Fractional final reward | binarize at the write site, then project recorded evidence (`reward_raw.txt` keeps the native value) | golden→`1`, broken→`0` in the real image |
 | Solvability from Oracle | attach a passing model run from `difficulty/` | `solvability_qc_status: pass` |
 | Stability frozen from Oracle | replay a model trajectory, re-grade 3–5× | replay reproduces original reward exactly |
 | Duplicate evaluation battery | delete the orphan, repoint the docs | `evidence_pairing_count` clears in full QC |
@@ -64,6 +66,8 @@ digraph repair {
     "0/1 confirmed?" [shape=diamond];
     "Evidence fix" [shape=box];
     "Replay reproduces?" [shape=diamond];
+    "Stale-run check" [shape=box];
+    "Ask user how to proceed" [shape=box];
     "Run after-QC, diff" [shape=box];
     "Revert, report" [shape=box];
 
@@ -74,8 +78,10 @@ digraph repair {
     "0/1 confirmed?" -> "Evidence fix" [label="yes"];
     "0/1 confirmed?" -> "Revert, report" [label="no"];
     "Evidence fix" -> "Replay reproduces?";
-    "Replay reproduces?" -> "Run after-QC, diff" [label="yes"];
+    "Replay reproduces?" -> "Stale-run check" [label="yes"];
     "Replay reproduces?" -> "Revert, report" [label="no"];
+    "Stale-run check" -> "Ask user how to proceed";
+    "Ask user how to proceed" -> "Run after-QC, diff" [label="user says re-run"];
 }
 ```
 
@@ -131,7 +137,9 @@ Two digests on one reference. Docker rejects it, so the image never builds, and 
 
 **Keep the FINAL digest.** Evidence for this: the package's own `client_qc/access-receipt.json` names the second digest; the first is an identical injected prefix across affected packages; the second matches what healthy packages use alone.
 
-`scripts/fix_digest.py` — rewrites on raw bytes, one substitution per file, asserts a single match.
+`scripts/fix_digest.py` — scans `environment/**/Dockerfile*`, compose files (`docker-compose*.yml|yaml`, `compose*.yml|yaml`) and `task.toml`; collapses two or more repeated digests to the reference plus the LAST digest, keeping any tag; rewrites on raw bytes so CRLF survives; refuses if more than one digest would remain. Dry run unless `--apply`.
+
+Do not use infra's `qc/client_feedback_fix.py` for this: it keeps the FIRST digest, the opposite of this rule.
 
 **A green build does NOT confirm the digest choice.** Both digests are real and both
 build. Keeping the wrong one silently swaps the base image and the oracle still passes.
@@ -142,13 +150,31 @@ Confirm the choice against the package's own evidence — `client_qc/access-rece
 
 ### 2. Fractional reward
 
-The contract: *final reward range is exactly {0, 1}*. Criterion-level scores may stay fractional — only the final value Harbor reads must be binary, and Harbor reads `reward.txt` first then `reward.json`, so both must change together.
+The contract: *final reward range is exactly {0, 1}*. Criterion-level scores may stay fractional — only the final value Harbor reads must be binary. Harbor (0.21/0.22) reads `reward.json` FIRST, and every value in it must be a number (a string value makes Harbor reject the file); it falls back to `reward.txt` only when there is no `reward.json`. Change both writers together, and keep them agreeing.
 
 Binarize at the write site: `1` if and only if the value is a complete pass with no gate applied, else `0`. Never round up — `0.999` is a `0`.
 
 Leave `reward_detail.json` and `verifier_summary.json` fractional.
 
-**Verify in the real image:** golden solution must emit exactly `1`; delete a required deliverable and it must emit exactly `0`.
+**Verify in the real image:** golden solution must emit exactly `1`; delete a required deliverable and it must emit exactly `0`. `scripts/verify_reward_binary.py TASK --image TAG --solution-cmd CMD --remove PATH` runs all three ends and reads both reward files the way Harbor does. `scripts/verify_reward_runtime.py WORK_DIR` runs the empty-workspace end over a whole corpus.
+
+**Then binarize the recorded evidence. This is required, not optional.** The runs already in `evaluations/` were graded by the old writer, so they can still record a fraction, and the client's binary-reward check reads them. Convert them exactly as **binary-reward-contract** does (in the delivery pipeline that skill runs first, so a package may arrive already converted). For each run whose recorded reward is not exactly 0 or 1:
+
+| File | Content |
+|---|---|
+| `verifier/reward_raw.txt` | the native value, unchanged (e.g. `0.1558`) |
+| `verifier/reward.txt` | `1` only if the native value is exactly 1, else `0` |
+| `verifier/reward.json` | `{"reward": <same 0/1>, "_marker": "harbor-binary-reward v1"}` |
+| `result.json` | `verifier_result.rewards.reward` (and `reward`, if present) set to the same 0/1 |
+| `verifier_summary.json`, `reward_detail.json`, `ctrf.json` | **unchanged** - per-check detail keeps the fraction |
+
+Every reward source the QC compares (`result.json`, `reward.json`, `reward.txt`) then agrees, and the native score stays in `reward_raw.txt`. This is not tampering: no verdict changes. Tampering is rounding up (`0.999` to `1`), or binarizing the evidence while the verifier code still writes fractions. Record every evidence file in the ledger.
+
+**Leave runs that already read exactly 0 or 1 byte-for-byte alone** - above all `evaluations/solvability/r1`. Stability repeats bind to a digest over r1's `result.json` bytes, so even re-serialising it breaks that binding.
+
+**A converted run is not a score change.** If a check reports a recorded reward that differs from the per-check total, and the difference is the fraction-to-0/1 conversion, it is the contract, not a defect. Known case: in the infra shipping gate, a run whose `verifier_summary.json` still holds the fractional total with no boolean `reward.pass` is reported as a reward artifact that "holds no number" (`validate_tasks.run_reward`, which reads the summary as a third reward source). That is the binarization showing, not a defect - report it as such.
+
+Binarizing evidence does not make a run stale (Harbor's task hash ignores `evaluations/`). Changing the verifier code in `tests/` does - see [Stale runs](#stale-runs-detect-notify-ask).
 
 ### 3. Solvability from Oracle
 
@@ -156,7 +182,7 @@ Leave `reward_detail.json` and `verifier_summary.json` fractional.
 
 The proof is usually already in the package — a `difficulty/rN` run at reward 1.0 with a trajectory. Copy it in verbatim as a new `solvability/rN`, leave the oracle run in place, and write `ATTACHED_FROM.json` recording source, both SHA-256s, and `"regraded": false`.
 
-`scripts/fix_solvability.py` — mirrors the checker's own eligibility test.
+`scripts/fix_solvability.py ROOT [--apply]` — mirrors the checker's own eligibility test (`audit_evaluations.classify_result` / `solvability_qc`): recursive leaf `result.json` discovery; Oracle detected by `oracle.txt` or a name starting with `oracle` in `agent_info`, `config.agent`, `trial_name` or `model`; reward from `verifier_result.rewards.reward`, booleans rejected; frozen and golden trajectory names accepted. A task that already has a valid recorded Oracle execution is left alone. It flags (does not change) tasks whose stability repeats bind to an Oracle `solvability/r1` - that is a call for a human.
 
 ### 4. Stability frozen from Oracle
 
@@ -166,7 +192,9 @@ An oracle replay has no trajectory, so there is nothing to freeze and nothing on
 
 Fix requires real execution: rebuild the model run's workspace by replaying its own tool calls, confirm it grades to the **same reward the original recorded**, then freeze and re-grade 3–5 times.
 
-`scripts/replay_regrade.py` — refuses to freeze on a reward mismatch. That refusal is the feature.
+**Check first whether the repeats still bind.** Recompute `package_evidence.oracle_replay_digest(evaluations/solvability/r1)` (infra `harbor_gce/package_evidence.py`). If it matches the digest the repeats declare, the evidence is valid and only the frozen artifact needs restoring - no replay.
+
+`scripts/replay_regrade.py TASK evaluations/difficulty/rN` — proves reproduction only. It refuses a source run whose recorded reward is not exactly 1, refuses when any workspace-changing tool call cannot be replayed (unless `--allow-skip`), and refuses on a reward mismatch. That refusal is the feature. It does not write evidence: once it passes, write the repeats in the format infra validates with infra's `harbor_gce/stability.py`.
 
 **Run the verifier phase as root (`docker exec -u 0`).** Images ending `USER <non-root>` cannot create `/logs`, so `test.sh` never writes `reward.txt` and the empty read looks exactly like a reward mismatch. Harbor runs the verifier as root.
 
@@ -188,7 +216,7 @@ python3 ledger.py add --step A1-digest --task NAME --file environment/Dockerfile
 python3 ledger.py verify --seq N --verified-by "docker build succeeded"
 ```
 
-Records carry `sha256_before/after`, `reversible`, and `verified_by`. A record without `verified_by` is an unfinished fix. `decisions.json` holds every judgement call with its evidence and who approved it.
+Records carry `sha256_before/after`, `reversible`, and `verified_by`. `sha256_before` comes from `--baseline-path`, or from `$FIXDIR/baseline/<task>/<file>` when that exists (FIXDIR defaults to the current directory). A record without `verified_by` is an unfinished fix. `decisions.json` holds every judgement call with its evidence and who approved it. Writes take a file lock, so concurrent agents do not lose records.
 
 ## Multi-Agent Split
 
@@ -199,7 +227,7 @@ Records carry `sha256_before/after`, `reversible`, and `verified_by`. A record w
 | `evidence-hygienist` | `evaluations/`, docs | `environment/`, `tests/` |
 | `verifier` | nothing — runs checks only | everything |
 
-**Serialise ledger writes.** `changes.json` is read-modify-write; two agents appending concurrently will lose a record.
+**Ledger writes are serialised by `ledger.py`'s file lock.** Do not write `changes.json` by hand.
 
 **The verifier agent never edits.** A fix confirmed only by its author is not confirmed.
 
@@ -220,12 +248,41 @@ Records carry `sha256_before/after`, `reversible`, and `verified_by`. A record w
 | Fixing behaviour without reconciling what describes it | README/`test.sh` header/docstring now lies; only a full QC run catches it |
 | Reading Layer 4/5 findings without checking lane health | You report harness failures as package defects |
 | Treating a connector task's absent reward as a defect | It has no gym in a bare container; nothing was gradable |
+| Fixing only `reward.txt` | Harbor reads `reward.json` first; a fractional or non-numeric `reward.json` still wins |
+| Re-running QC on your own after an edit | Spends budget and replaces accepted evidence without the user's say; report stale runs and ask |
+
+## Stale runs: detect, notify, ask
+
+Harbor binds every run to a content hash of the task: `task.toml`, `instruction.md`, `README.md`, and everything under `environment/`, `tests/`, `solution/` and `steps/` (filtered by the task's `.gitignore`). Infra's Final QC gate and the client's `audit_oracle` compare against that hash. Edit any of those files and every recorded run, and every QC report, now describes a task that no longer exists - the run is **stale**.
+
+| Edit | Stale? |
+|---|---|
+| Dockerfile digest fix (`environment/`) | yes |
+| Verifier / reward-writer fix (`tests/`, and its `_app/tests` mirror) | yes |
+| `README.md` reconciliation | yes |
+| Evidence binarization, new `solvability/rN`, orphan battery removal (`evaluations/`) | no |
+| `review.csv`, `client_qc*` amendments, other root files | no |
+
+Separately, a package's embedded certificate (`qc_report.html`) digests **every** file, so any edit at all breaks it.
+
+After the repairs, run:
+
+```bash
+python3 scripts/stale_runs.py baseline/ work/          # dirs, single tasks, or zips
+python3 scripts/stale_runs.py baseline/ work/ --json   # machine-readable
+```
+
+It does not compute a hash. It lists the files that differ between the two sides and checks each one against the file list Harbor's hash reads (copied from Harbor's `Packager.collect_files`, the function the client QC and infra call). A task is STALE only when a changed file is on that list; edits elsewhere never mark it stale. Tasks whose `.gitignore` cannot be evaluated are reported as UNSURE rather than guessed. It also lists every task whose certificate breaks.
+
+**Do not re-run QC, batteries or the Oracle automatically.** Re-running costs money and can change the evidence the client already accepted. When the report shows stale tasks, stop and tell the user: which tasks, which files moved the hash, and whether certificates break. Then ask how to proceed (re-run QC for those tasks, re-run the batteries, accept and document, or revert the edit). Record the answer in `decisions.json`.
+
+**Optional read-only shipping check.** When the infra repo is available, `python3 harbor_gce/validate_tasks.py work/ --profile delivery --json` runs the delivery gate without uploading or changing anything. Expect certificate digest failures on every edited package; report them as part of the stale-run notice rather than as new defects. Also expect, on binarized runs, a run whose `verifier_summary.json` still holds the fractional total with no boolean `reward.pass` is reported as a reward artifact that "holds no number" (`validate_tasks.run_reward`, which reads the summary as a third reward source). That is the binarization showing, not a defect - report it as such.
 
 ## Measuring Before/After
 
-Run full QC before and after, then diff **raw finding counts** per area — not sets of criteria, which dedupe and won't reconcile with totals.
+Run full QC before and after (after-QC only once the user has said to re-run), then diff **raw finding counts** per area — not sets of criteria, which dedupe and won't reconcile with totals.
 
-`scripts/qc_delta.py` — reports per-task, per-area counts and flags tasks missing an after-report.
+`scripts/qc_delta.py BEFORE AFTER` — pairs tasks by sub-folder name and reads the client `report.json`, infra's Harbor Check / Final QC `report.json` (`findings` / `category_results`), or `findings.csv`. Reports per-task, per-area counts, flags tasks missing an after-report, and lists after-only tasks separately.
 
 **A task that produced no after-report is not a pass.** Report it separately; a blocked pipeline is not a clean package.
 

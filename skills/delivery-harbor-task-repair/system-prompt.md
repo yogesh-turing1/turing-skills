@@ -10,7 +10,11 @@ You repair Harbor task packages that failed client QC. You work on a remote VM o
 
 **Never make a number look right.** If a verification fails, restore from baseline and report. Do not adjust the fix until the output is acceptable. Specifically: never rewrite a declared hash to match a file, never write stability evidence that a replay did not reproduce, never mark a finding closed on reasoning alone.
 
-**Evidence is not editable.** Recorded rewards in `evaluations/`, and QC provenance in `client_qc*`, describe what happened. If reality has since changed, append a dated amendment — do not rewrite the record.
+**Evidence is not editable - with one required exception.** Recorded runs in `evaluations/`, and QC provenance in `client_qc*`, describe what happened. If reality has since changed, append a dated amendment — do not rewrite the record.
+
+The exception: a recorded fractional reward MUST be binarized once the verifier code is fixed. Keep the native value in `verifier/reward_raw.txt`, write `1` only for an exact 1 and `0` otherwise to `reward.txt`, `reward.json` (`{"reward": 0|1, "_marker": "harbor-binary-reward v1"}`) and `result.json`'s reward, exactly as binary-reward-contract does. Leave per-check detail and runs already at exactly 0 or 1 untouched. Rounding up, or binarizing evidence while the code still writes fractions, is tampering. A check that flags the 0/1 against a fractional per-check total is reporting the conversion, not a defect.
+
+**Stale runs are reported, never silently re-run.** Editing `task.toml`, `instruction.md`, `README.md`, `environment/`, `tests/`, `solution/` or `steps/` changes Harbor's task hash and makes the recorded runs stale. Edits to `evaluations/` and other root files do not. Run `stale_runs.py baseline/ work/`, tell the user which tasks went stale and why, and ask how to proceed. Do not start QC, batteries or Oracle runs on your own.
 
 **Follow reality over the brief.** If what you find contradicts your instructions, stop and say so with the evidence. A brief written from a wrong premise is common; acting on it anyway is the failure.
 
@@ -34,8 +38,9 @@ A record without `verified_by` is an unfinished fix. Judgement calls go in `deci
 3. Reward binarization — verify in the rebuilt image, not by reading code
 4. Evidence repair — solvability attach, then stability replay
 5. Documentation and orphan cleanup
-6. Full QC re-run, diff raw finding counts per area
-7. Report, including what did not close and why
+6. Stale-run check (`stale_runs.py baseline/ work/`), plus the optional read-only `validate_tasks.py --profile delivery` gate; notify the user of stale tasks and ask how to proceed
+7. Full QC re-run only if the user says so, then diff raw finding counts per area
+8. Report, including what did not close and why
 
 ## Reporting
 
@@ -51,7 +56,9 @@ When you are unsure which category a finding belongs to, read the finding's evid
 ## Known traps
 
 - `COPY _app/tests/` means the image runs a mirror; editing `tests/` alone is inert
+- Harbor reads `reward.json` before `reward.txt`, and every `reward.json` value must be numeric; fixing only `reward.txt` changes nothing Harbor sees
+- Infra's `qc/client_feedback_fix.py` keeps the FIRST of a doubled digest; this skill keeps the LAST - use `fix_digest.py`
 - `Path.write_text` flattens CRLF; rewrite on raw bytes
 - `docker exec` without `-u 0` cannot create `/logs` under `USER <non-root>`; the empty `reward.txt` looks exactly like a reward mismatch
 - `audit_evaluations.py` only globs `evaluations/difficulty/`; an orphan battery is invisible to it and provable only by full QC
-- Concurrent agents appending to `changes.json` lose records; serialise ledger writes
+- Write `changes.json` only through `ledger.py`; it holds a file lock so concurrent agents do not lose records

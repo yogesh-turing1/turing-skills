@@ -38,6 +38,12 @@ The recorded artifacts were already binary — every `reward.txt` under `evaluat
 read 0 or 1, with `reward_raw.txt` beside the rewritten ones. **Only the verifier code
 was missed.** An earlier sweep fixed evidence and not source.
 
+> **Clarification (2026-10-07).** Binarizing recorded rewards is required, not forbidden.
+> The defect here was binarizing evidence *instead of* fixing the code. The correct order
+> is: fix the writer, verify in the image, then project the recorded evidence
+> (`reward_raw.txt` keeps the native value; `reward.txt`, `reward.json` and `result.json`'s
+> reward get the strict 0/1, as binary-reward-contract does). See SKILL.md fix 2.
+
 Writers found:
 
 | Shape | Example |
@@ -171,6 +177,12 @@ look right while the contract lives in the code.
 The treatment hit the same anomaly and refused it: *"If the client wants packaged
 evidence regenerated under the fixed code, that needs re-running the trials, not editing
 the artifacts."*
+
+> **Clarification (2026-10-07).** Converting the recorded reward to 0/1 (`reward.txt`,
+> `reward.json`, `result.json`) with the native value kept in `reward_raw.txt` is the required
+> step, not this failure. What the control did wrong was to do it without `reward_raw.txt`,
+> to rewrite the per-check `reward_detail.json` and the QC documents, and to treat that as
+> the fix while the contract lives in the code.
 
 **Lesson for this skill's shape:** the value is in the prohibitions, not the procedures.
 A capable agent finds the write site, verifies in a container and updates the docs on its

@@ -16,6 +16,16 @@ Per-check detail is never touched: `verifier_summary.json`, `reward_detail.json`
 keep the full payload. Every file edited under this contract carries the marker
 `harbor-binary-reward v1`.
 
+**Where the marker goes.** In verifier code, as a comment. In a recorded run's `reward.json`, as the
+`"_marker": "harbor-binary-reward v1"` key (the shape infra's Final QC checks). Never in a `reward.json`
+the live verifier writes - Harbor rejects a `reward.json` with any non-numeric value - and never in
+`reward.txt`, which must parse as a bare number.
+
+**Harbor's read order.** Harbor (0.21/0.22) reads `reward.json` FIRST; every value in it must be a
+number. It falls back to `reward.txt` only when there is no `reward.json`. So a writer that binarizes
+`reward.txt` but still writes a fractional `reward.json` is not compliant - change both, and keep them
+agreeing.
+
 ---
 
 ## The two places it applies
@@ -26,6 +36,21 @@ keep the full payload. Every file edited under this contract carries the marker
 `verifier/reward.json` and `result.json` (`verifier_result.rewards`) all carry 0/1 only. The graded
 value of every rewritten run is kept beside it in **`verifier/reward_raw.txt`** — it is evidence, not
 noise, and discarding it destroys the only record of how close a failing run was.
+
+Converting recorded runs is required, not optional, and it is not tampering: the verdict does not
+change and the native value is kept. Rounding up (`0.999` to `1`) or converting the evidence while the
+code still writes fractions is tampering.
+
+**Touch only runs that need converting.** A run already at exactly 0 or 1 stays byte-for-byte as it
+was - above all `evaluations/solvability/r1`, whose `result.json` bytes are hashed into the stability
+repeats' Oracle replay binding; re-serialising it breaks that binding.
+
+**Downstream checks see a conversion, not a score change.** `result.json`, `reward.json` and
+`reward.txt` agree after conversion, so the reward-conflict checks stay quiet, and the `_marker` key in
+a recorded `reward.json` is ignored by every packaged-run reader. One known exception: infra's shipping
+gate (`harbor_gce/validate_tasks.py` `run_reward`) also reads `verifier_summary.json` as a reward source.
+When that summary keeps the fractional total without a boolean `reward.pass`, it reports the run's reward
+artifact as holding "no number". That is this conversion showing, not a defect; report it as such.
 
 ---
 
@@ -60,6 +85,20 @@ assert them separately.
 
 Record per package: the family, how many recorded runs were converted, how many were already binary,
 and which files were edited.
+
+---
+
+## Which edits make recorded runs stale
+
+Harbor binds each run to a content hash of `task.toml`, `instruction.md`, `README.md`, `environment/`,
+`tests/`, `solution/` and `steps/`. **The scoring-code edit (under `tests/`, and its `_app/tests`
+mirror) changes that hash, so every recorded run and QC report for that package goes stale.** Converting
+the recorded runs under `evaluations/` does not. Any edit at all breaks an embedded `qc_report.html`
+certificate.
+
+After converting, run `delivery-harbor-task-repair/scripts/stale_runs.py BEFORE AFTER` (directories or
+zips). Do not re-run QC or batteries automatically: tell the user which tasks went stale and which
+files moved the hash, and ask how to proceed.
 
 ---
 
