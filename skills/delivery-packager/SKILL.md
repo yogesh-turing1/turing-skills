@@ -1,6 +1,6 @@
 ---
 name: delivery-packager
-description: End-to-end Harbor/Shannon task delivery — select a batch from the accepted GCS source, audit it against the fourteen QC factors, remediate and sanitise what is genuinely wrong, package into difficulty/category folders with a reconciled manifest, and emit the client dataset report. Use when asked to prepare, package, remediate, sanitise, or ship a batch of Harbor task archives, or to produce a dataset/delivery report for one. Runs end to end without further input.
+description: End-to-end Harbor/Shannon task delivery — select a batch from the accepted GCS source, audit it against the fourteen QC factors, remediate and sanitise what is genuinely wrong, package into difficulty/category folders with a reconciled manifest, and emit the client dataset report. Use when asked to prepare, package, remediate, sanitise, or ship a batch of Harbor task archives, or to produce a dataset/delivery report for one. Runs end to end without further input, except that it asks before re-running anything when an edit makes recorded runs stale.
 ---
 
 # Harbor delivery packager
@@ -8,7 +8,7 @@ description: End-to-end Harbor/Shannon task delivery — select a batch from the
 > Two packager skills exist. This one packages by **difficulty/category** and covers running a whole batch in parallel. `delivery-packager-full` packages by **execution type** and carries the twelve mechanical checks inline.
 
 Take N accepted task archives from GCS, prove they are sound, fix what is genuinely wrong, and ship a
-package plus a client report. Runs unattended: every decision below is already made.
+package plus a client report. Runs unattended: every decision below is already made, except one - if an edit makes recorded runs stale, it stops and asks the user how to proceed.
 
 **This supersedes `harbor-60-task-delivery-runbook.md`.** That runbook is stale in ways that will actively
 mislead you — see [Where the runbook is wrong](#where-the-runbook-is-wrong). Follow this file.
@@ -293,6 +293,26 @@ Re-run the audit and the sensitive-data sweep over the edited archives. Every cl
 zero. Refresh hashes and sizes in every manifest. If a class does not go to zero, your fix was incomplete —
 find out why before moving on.
 
+### Check for stale runs, and ask before re-running anything
+
+Harbor binds each recorded run, and the client's QC, to a content hash of the task: `task.toml`,
+`instruction.md`, `README.md`, and everything under `environment/`, `tests/`, `solution/` and `steps/`.
+An edit to any of those (a digest pin, a README reconciled to evidence, a sanitised path in `tests/`)
+makes every recorded run and QC verdict for that package **stale**. Edits under `evaluations/` and to
+other root files do not. Any edit at all breaks an embedded `qc_report.html` certificate.
+
+```bash
+python3 ../delivery-harbor-task-repair/scripts/stale_runs.py <source-zips-dir> <edited-zips-dir> [--json]
+```
+
+It pairs tasks by root folder and lists the files that differ between the two sides. It does not compute a
+hash: a task is stale only when a changed file is one Harbor's task hash reads (the list is copied from
+Harbor's own `Packager.collect_files`). It also lists every broken certificate.
+
+**Do not re-run QC, batteries or the Oracle automatically.** If any task is stale, stop and tell the user:
+which tasks, which files moved the hash, and which certificates break. Ask how to proceed (re-run QC for
+those tasks, accept and document the staleness, or revert the edit) and record the answer. This is the one
+point where the run waits for input.
 ---
 
 ## Phase 6 — Package
@@ -330,6 +350,13 @@ redundant and reads as ops residue.
 3. Difficulty **recomputed independently from the raw rewards** matches the folder each task sits in.
 4. Counts reconcile with the manifest's own summary; the requested count is met.
 5. Leave the verifier as a runnable script that exits non-zero on failure.
+6. The stale-run check has run, and the user has answered for every stale task.
+7. Optional, when the infra repo is available: `python3 harbor_gce/validate_tasks.py <delivery-dir> --profile
+   delivery --json`. It is read-only - it extracts to a temp directory and only reports. Expect certificate
+   digest failures on every edited package; report them with the stale-run notice, not as new defects.
+   On runs converted to binary rewards, a fractional `verifier_summary.json` total without a boolean
+   `reward.pass` is reported as a reward artifact that "holds no number" - that is the conversion, not a
+   defect.
 
 Sweep OS artefacts (`.DS_Store`, `__MACOSX`, `._*`) **last** — macOS recreates them every time Finder opens
 the folder.
